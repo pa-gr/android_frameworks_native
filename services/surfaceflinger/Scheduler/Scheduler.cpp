@@ -66,6 +66,7 @@ Scheduler::~Scheduler() {
     // Stop timers and wait for their threads to exit.
     mDisplayPowerTimer.reset();
     mTouchTimer.reset();
+    mHeuristicIdleTimer.reset();
 
     // Stop idle timer and clear callbacks, as the RefreshRateConfigs may outlive the Scheduler.
     setRefreshRateConfigs(nullptr);
@@ -91,6 +92,12 @@ void Scheduler::startTimers() {
                 [this] { displayPowerTimerCallback(TimerState::Expired); });
         mDisplayPowerTimer->start();
     }
+
+    mHeuristicIdleTimer.emplace(
+            "heuristicIdleTimer", std::chrono::milliseconds(HEURISTIC_TIMEOUT_MS),
+            [this] { heuristicIdleTimerCallback(TimerState::Reset); },
+            [this] { heuristicIdleTimerCallback(TimerState::Expired); });
+    mHeuristicIdleTimer->start();
 }
 
 void Scheduler::setRefreshRateConfigs(std::shared_ptr<RefreshRateConfigs> configs) {
@@ -593,6 +600,9 @@ void Scheduler::onTouchHint() {
         std::scoped_lock lock(mRefreshRateConfigsLock);
         mRefreshRateConfigs->resetIdleTimer(/*kernelOnly*/ true);
     }
+    if (mHeuristicIdleTimer) {
+        mHeuristicIdleTimer->reset();
+    }
 }
 
 void Scheduler::setDisplayPowerState(bool normal) {
@@ -643,6 +653,11 @@ void Scheduler::idleTimerCallback(TimerState state) {
         applyPolicy(&Policy::idleTimer, state);
     }
     ATRACE_INT("ExpiredIdleTimer", static_cast<int>(state));
+}
+
+void Scheduler::heuristicIdleTimerCallback(TimerState state) {
+    applyPolicy(&Policy::heuristicIdleTimer, state);
+    ALOGV("%s: TimerState %d", __func__, static_cast<int>(state));
 }
 
 void Scheduler::touchTimerCallback(TimerState state) {
@@ -766,7 +781,8 @@ auto Scheduler::chooseDisplayMode() -> std::pair<DisplayModePtr, GlobalSignals> 
     }
 
     const GlobalSignals signals{.touch = mTouchTimer && mPolicy.touch == TouchState::Active,
-                                .idle = mPolicy.idleTimer == TimerState::Expired};
+                                .idle = mPolicy.idleTimer == TimerState::Expired,
+                                .heuristicIdle = mPolicy.heuristicIdleTimer == TimerState::Expired};
 
     return configs->getBestRefreshRate(mPolicy.contentRequirements, signals);
 }
