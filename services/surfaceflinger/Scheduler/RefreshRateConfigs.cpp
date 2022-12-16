@@ -287,24 +287,18 @@ auto RefreshRateConfigs::getBestRefreshRate(const std::vector<LayerRequirement>&
         -> std::pair<DisplayModePtr, GlobalSignals> {
     std::lock_guard lock(mLock);
 
-    bool expired = false;
-    const auto curTime = systemTime(SYSTEM_TIME_MONOTONIC);
-
-    if (mGetBestRefreshRateCache) {
-        if ((curTime - mGetBestRefreshRateCache->timestamp) >= EXPIRE_TIMEOUT) {
-            expired = true;
-        } else if (mGetBestRefreshRateCache->arguments == std::make_pair(layers, signals)) {
-            return mGetBestRefreshRateCache->result;
-        }
+    if (mGetBestRefreshRateCache &&
+        mGetBestRefreshRateCache->arguments == std::make_pair(layers, signals)) {
+        return mGetBestRefreshRateCache->result;
     }
 
-    const auto result = getBestRefreshRateLocked(layers, signals, expired);
-    mGetBestRefreshRateCache = GetBestRefreshRateCache{{layers, signals}, result, curTime};
+    const auto result = getBestRefreshRateLocked(layers, signals);
+    mGetBestRefreshRateCache = GetBestRefreshRateCache{{layers, signals}, result};
     return result;
 }
 
 auto RefreshRateConfigs::getBestRefreshRateLocked(const std::vector<LayerRequirement>& layers,
-                                                  GlobalSignals signals, const bool expired) const
+                                                  GlobalSignals signals) const
         -> std::pair<DisplayModePtr, GlobalSignals> {
     ATRACE_CALL();
     ALOGV("%s: %zu layers", __func__, layers.size());
@@ -460,20 +454,8 @@ auto RefreshRateConfigs::getBestRefreshRateLocked(const std::vector<LayerRequire
                 continue;
             }
 
-            float layerScore;
-
-            if (layer.vote == LayerVoteType::Heuristic && expired &&
-                    isStrictlyLess(60_Hz, mode->getFps())) {
-                // Time for heuristic layer to keep using high refresh rate has been expired
-                layerScore = 0;
-                localIsIdle = true;
-                ALOGV("%s expired to keep using %s", formatLayerInfo(layer, weight).c_str(),
-                      to_string(mode->getFps()).c_str(), layerScore);
-            } else {
-                layerScore =
+            const auto layerScore =
                     calculateLayerScoreLocked(layer, mode->getFps(), isSeamlessSwitch);
-            }
-
             ALOGV("%s gives %s score of %.4f", formatLayerInfo(layer, weight).c_str(),
                   to_string(mode->getFps()).c_str(), layerScore);
 
