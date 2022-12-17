@@ -484,13 +484,14 @@ auto RefreshRateConfigs::getBestRefreshRateLocked(const std::vector<LayerRequire
 
     const auto selectivelyForceIdle = [&] () -> std::pair<DisplayModePtr, GlobalSignals>  {
         ALOGV("localIsIdle: %s", localIsIdle ? "true" : "false");
-        if (localIsIdle && isStrictlyLess(60_Hz, bestRefreshRate->getFps())) {
+        if (localIsIdle && mIdleRefreshRateModeIt != NULL
+                && isStrictlyLess(60_Hz, bestRefreshRate->getFps())) {
             /*
              * We heavily rely on touch to boost higher than 60 fps.
              * Fallback to 60 fps if an higher fps was calculated.
              */
             ALOGV("Forcing idle");
-            return {mIdleRefreshRate, kNoSignals};
+            return {mIdleRefreshRateModeIt->second, kNoSignals};
         }
 
         return {bestRefreshRate, kNoSignals};
@@ -878,15 +879,20 @@ void RefreshRateConfigs::constructAvailableRefreshRates() {
         LOG_ALWAYS_FATAL_IF(modes.empty(), "No matching modes for %s range %s", rangeName,
                             to_string(range).c_str());
 
+        // Reset and store idle refresh rate
+        mIdleRefreshRateModeIt = NULL;
+        for (const auto modeIt : modes) {
+            if (isApproxEqual(modeIt->second->getFps(), 60_Hz)) {
+                mIdleRefreshRateModeIt = modeIt;
+                ALOGV("idleRefreshRate set!");
+            }
+        }
+
         const auto stringifyModes = [&] {
             std::string str;
             for (const auto modeIt : modes) {
                 str += to_string(modeIt->second->getFps());
                 str.push_back(' ');
-                if (isApproxEqual(modeIt->second->getFps(), 60_Hz)) {
-                    mIdleRefreshRate = modeIt->second;
-                    ALOGV("idleRefreshRate set!");
-                }
             }
             return str;
         };
