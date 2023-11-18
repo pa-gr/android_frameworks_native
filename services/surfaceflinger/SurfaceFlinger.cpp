@@ -1459,11 +1459,23 @@ status_t SurfaceFlinger::getDynamicDisplayInfo(const sp<IBinder>& displayToken,
 
     info->activeDisplayModeId = display->getActiveMode()->getId().value();
 
+    const auto minId = display->refreshRateConfigs().getMinRefreshRate()->getId();
+    if (info->activeDisplayModeId == minId.value()) {
+        // Disguise 30 Hz mode as 60 Hz for framework.
+        info->activeDisplayModeId = display->refreshRateConfigs()
+                                    .getIdleRefreshRate()->getId().value();
+    }
+
     const auto& supportedModes = display->getSupportedModes();
     info->supportedDisplayModes.clear();
     info->supportedDisplayModes.reserve(supportedModes.size());
 
     for (const auto& [id, mode] : supportedModes) {
+        if (id == minId) {
+            // Do not advertise 30 Hz mode to framework.
+            continue;
+        }
+
         ui::DisplayMode outMode;
         outMode.id = static_cast<int32_t>(id.value());
 
@@ -1742,7 +1754,11 @@ void SurfaceFlinger::setActiveModeInHwcIfNeeded() {
         // allowed modes might have changed by the time we process the refresh.
         // Make sure the desired mode is still allowed
         const auto displayModeAllowed =
-                display->refreshRateConfigs().isModeAllowed(desiredActiveMode->mode->getId());
+                display->refreshRateConfigs().isModeAllowed(desiredActiveMode->mode->getId())
+                // Allow lowest refresh rate (30Hz) in AOD
+                || (display->getPowerMode() == hal::PowerMode::DOZE
+                    && (display->refreshRateConfigs().getMinRefreshRate()->getId()
+                        == desiredActiveMode->mode->getId()));
         if (!displayModeAllowed) {
             clearDesiredActiveModeState(display);
             continue;
@@ -6374,8 +6390,18 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
         mVisibleRegionsDirty = true;
         // from this point on, SF will stop drawing on this display
     } else if (mode == hal::PowerMode::DOZE || mode == hal::PowerMode::ON) {
+        // Set to lowest refresh rate (30Hz) for AOD
+        DisplayModePtr min = display->refreshRateConfigs().getMinRefreshRate();
+        if (mode == hal::PowerMode::DOZE && !mDebugDisplayModeSetByBackdoor) {
+            setDesiredActiveMode({min, DisplayModeEvent::Changed}, true);
+            setActiveModeInHwcIfNeeded();
+        }
         // Update display while dozing
         getHwComposer().setPowerMode(displayId, mode);
+        // Reset refresh rate when exiting AOD
+        if (mode == hal::PowerMode::ON && !mDebugDisplayModeSetByBackdoor) {
+            applyRefreshRateConfigsPolicy(display);
+        }
 	if (isDummyDisplay) {
 	    if (isDisplayActiveLocked(display) && *currentMode == hal::PowerMode::DOZE_SUSPEND) {
                 mScheduler->onScreenAcquired(mAppConnectionHandle);

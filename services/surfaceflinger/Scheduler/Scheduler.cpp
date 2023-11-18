@@ -341,6 +341,10 @@ void Scheduler::dispatchCachedReportedMode() {
 }
 
 void Scheduler::onNonPrimaryDisplayModeChanged(ConnectionHandle handle, DisplayModePtr mode) {
+    if (mode->getId() == mRefreshRateConfigs->getMinRefreshRate()->getId()) {
+        // Disguise 30 Hz mode as 60 Hz for framework.
+        mode = mRefreshRateConfigs->getIdleRefreshRate();
+    }
     android::EventThread* thread;
     {
         std::lock_guard<std::mutex> lock(mConnectionsLock);

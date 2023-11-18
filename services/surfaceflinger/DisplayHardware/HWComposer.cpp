@@ -267,6 +267,9 @@ std::vector<HWComposer::HWCDisplayMode> HWComposer::getModes(PhysicalDisplayId d
     auto error = static_cast<hal::Error>(mComposer->getDisplayConfigs(hwcDisplayId, &configIds));
     RETURN_IF_HWC_ERROR_FOR("getDisplayConfigs", error, *toPhysicalDisplayId(hwcDisplayId), {});
 
+    // Add 30Hz mode for marble
+    configIds.push_back(3);
+
     std::vector<HWCDisplayMode> modes;
     modes.reserve(configIds.size());
     for (auto configId : configIds) {

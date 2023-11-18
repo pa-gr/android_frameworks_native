@@ -730,6 +730,11 @@ std::optional<Fps> RefreshRateConfigs::onKernelTimerChanged(
     return mode->getFps();
 }
 
+DisplayModePtr RefreshRateConfigs::getMinRefreshRate() const {
+    std::lock_guard lock(mLock);
+    return mMinRefreshRateModeIt->second;
+}
+
 const DisplayModePtr& RefreshRateConfigs::getMinRefreshRateByPolicyLocked() const {
     for (const DisplayModeIterator modeIt : mPrimaryRefreshRates) {
         const auto& mode = modeIt->second;
@@ -781,6 +786,11 @@ const DisplayModePtr& RefreshRateConfigs::getCurrentRefreshRateByPolicyLocked() 
 
     // Default to the current policy's default refresh rate.
     return mDisplayModes.get(getCurrentPolicyLocked()->defaultMode)->get();
+}
+
+DisplayModePtr RefreshRateConfigs::getIdleRefreshRate() const {
+    std::lock_guard lock(mLock);
+    return mIdleRefreshRateModeIt->second;
 }
 
 DisplayModePtr RefreshRateConfigs::getActiveMode() const {
@@ -930,6 +940,10 @@ void RefreshRateConfigs::constructAvailableRefreshRates() {
 
     const auto filterRefreshRates = [&](FpsRange range, const char* rangeName) REQUIRES(mLock) {
         const auto filter = [&](const DisplayMode& mode) {
+            if (mode.getId() == mMinRefreshRateModeIt->second->getId()) {
+                // Reserve the lowest refresh rate (30Hz) for AOD.
+                return false;
+            }
             return mode.getResolution() == defaultMode->getResolution() &&
                     mode.getDpi() == defaultMode->getDpi() &&
                     (policy->allowGroupSwitching || mode.getGroup() == defaultMode->getGroup()) &&
