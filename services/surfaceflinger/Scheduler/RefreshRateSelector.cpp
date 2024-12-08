@@ -506,22 +506,26 @@ auto RefreshRateSelector::getRankedFrameRatesLocked(const std::vector<LayerRequi
             seamedFocusedLayers > 0 ? activeMode.getGroup() : defaultMode->getGroup();
 
     const auto selectivelyForceIdle = [&]() REQUIRES(mLock) -> RankedFrameRates {
-        ALOGV("selectivelyForceIdle(): localIsIdle = %s", localIsIdle ? "true" : "false");
-        if (localIsIdle && ranking.front().frameRateMode.fps > 60_Hz) {
+        ALOGV("selectivelyForceIdle(): localIsIdle: %d, hasExplicitVoteLayers: %d",
+                localIsIdle, hasExplicitVoteLayers);
+
+        if (localIsIdle && !hasExplicitVoteLayers && ranking.front().frameRateMode.fps > mIdleFps) {
             /*
              * We heavily rely on touch to boost higher than 60 fps.
-             * Fallback to 60 fps if a higher fps was calculated.
+             * Fallback to idle fps if a higher fps was calculated.
              */
             auto idleRanking = rankFrameRates(activeMode.getGroup(), RefreshRateOrder::Ascending);
-            // Find the 60 Hz mode in the ranking
-            auto it = std::find_if(idleRanking.begin(), idleRanking.end(),
-                                   [](const ScoredFrameRate& sfr) {
-                                       return isApproxEqual(sfr.frameRateMode.fps, 60_Hz);
+            // Find the idle mode in the ranking
+            const auto it = std::find_if(idleRanking.begin(), idleRanking.end(),
+                                   [&](const ScoredFrameRate& sfr) {
+                                       return isApproxEqual(sfr.frameRateMode.fps, mIdleFps);
                                    });
             if (it != idleRanking.end()) {
+                idleRanking = FrameRateRanking{*it};
                 ALOGV("Forcing idle");
-                return {FrameRateRanking{*it}, GlobalSignals{.idle = true}};
             }
+            // Otherwise return the idle ranking as it is
+            ALOGV("%s scored", to_string(idleRanking.front().frameRateMode.fps).c_str());
             return {idleRanking, GlobalSignals{.idle = true}};
         }
 
@@ -1330,6 +1334,13 @@ void RefreshRateSelector::constructAvailableRefreshRates() {
 
     mPrimaryFrameRates = filterRefreshRates(policy->primaryRanges, "primary");
     mAppRequestFrameRates = filterRefreshRates(policy->appRequestRanges, "app request");
+
+    // Idle refresh rate is 60 Hz while respecting minimum of primary and app ranges.
+    const Fps minPrimary = mPrimaryFrameRates.front().modePtr.get()->getFps();
+    const Fps minAppRequest = mAppRequestFrameRates.front().modePtr.get()->getFps();
+    mIdleFps = std::max({60_Hz, minPrimary, minAppRequest}, fps_approx_ops::operator<);
+
+    ALOGV("idle refresh rate calculated: %s", to_string(mIdleFps).c_str());
 }
 
 Fps RefreshRateSelector::findClosestKnownFrameRate(Fps frameRate) const {
